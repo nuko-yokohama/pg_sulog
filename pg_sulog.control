@@ -1,0 +1,5 @@
+# pgaudit extension
+comment = 'pg_heartman: PostgreSQL hook sample'
+default_version = '1.0'
+module_pathname = '$libdir/pg_hearman'
+relocatable = true
