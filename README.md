@@ -37,6 +37,7 @@ The default is `off`.
 * OS
   * CentOS 7
 * PostgreSQL
+  * 9.6-develop (maybe)
   * 9.5-beta2
   * 9.4
   * 9.3
