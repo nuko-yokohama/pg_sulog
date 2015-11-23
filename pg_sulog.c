@@ -9,29 +9,14 @@
  */
 #include "postgres.h"
 
-#include "access/htup_details.h"
-#include "access/sysattr.h"
-#include "access/xact.h"
-#include "catalog/catalog.h"
-#include "catalog/objectaccess.h"
-#include "catalog/pg_class.h"
-#include "catalog/namespace.h"
-#include "commands/dbcommands.h"
-#include "catalog/pg_proc.h"
-#include "commands/event_trigger.h"
 #include "executor/executor.h"
 #include "executor/spi.h"
 #include "miscadmin.h"
 #include "libpq/auth.h"
-#include "nodes/nodes.h"
 #include "tcop/utility.h"
-#include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/guc.h"
-#include "utils/lsyscache.h"
 #include "utils/memutils.h"
-#include "utils/rel.h"
-#include "utils/syscache.h"
 #include "utils/timestamp.h"
 
 #include "pgtime.h"
@@ -42,7 +27,7 @@ PG_MODULE_MAGIC;
 #define SU_LIST_MAX  64
 #define BUFFER_SIZE NAMEDATALEN * 4
 
-bool createdFlag = false;
+bool creatingFlag = false;
 
 bool sulogDisableCommand = false;
 char* sulogDatabase = "postgres";
@@ -97,7 +82,7 @@ static int createSuperuserList() {
     bool ret = false;
     int proc;
 
-    createdFlag = true;
+    creatingFlag = true;
 
     elog(DEBUG1, "SPI_CONNECT\n");
     SPI_connect();
@@ -140,7 +125,7 @@ static void clearSuperuserList(void) {
         strcpy(suList[i], "");
     }
     suNum = 0;
-    createdFlag = false;
+    creatingFlag = false;
 }
 
 /*
@@ -157,9 +142,9 @@ pg_sulog_ExecutorRun_hook(QueryDesc *queryDesc, ScanDirection direction, long co
 {
     bool suFlag = false;
 
-    elog(DEBUG1, "pg_sulog: pg_sulog_ExecutorRun_hook start, createdFlag = %d", createdFlag);
+    elog(DEBUG1, "pg_sulog: pg_sulog_ExecutorRun_hook start, creatingFlag = %d", creatingFlag);
     debugPrintSuperuserList();
-    if (suNum == 0 && (createdFlag == false))
+    if (suNum == 0 && (creatingFlag == false))
         createSuperuserList(); // only 1 time called
 
     suFlag = isSuperuser();
@@ -203,7 +188,7 @@ pg_sulog_ProcessUtility_hook(Node *parsetree,
     bool suFlag;
 
     debugPrintSuperuserList();
-    if (suNum == 0 && (createdFlag == false))
+    if (suNum == 0 && (creatingFlag == false))
         createSuperuserList(); // only 1 time called
 
     debugPrintSuperuserList();
@@ -273,7 +258,7 @@ _PG_init(void)
         GUC_NOT_IN_SAMPLE,
         NULL, NULL, NULL);
 
-    createdFlag = false;
+    creatingFlag = false;
 
     /*
      * Install our hook functions after saving the existing pointers to
