@@ -41,11 +41,14 @@ The default is `off`.
   * 9.4
   * 9.3
 
+## Limitations
+
+* The maximum number of super user is 64.
+
 ## Todo
 
 * Output format customize.
 * Other platform verification.
-  * 9.6 (not work)
 * Regression test
 * Stability verification
 

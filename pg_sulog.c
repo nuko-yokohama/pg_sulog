@@ -40,6 +40,8 @@
 PG_MODULE_MAGIC;
 
 #define SU_LIST_MAX  64
+#define BUFFER_SIZE NAMEDATALEN * 4
+
 bool createdFlag = false;
 
 bool sulogDisableCommand = false;
@@ -48,7 +50,7 @@ char* sulogUser= "postgres";
 char* sulogPassword = "";
 
 int suNum;
-char* suList[SU_LIST_MAX];
+char suList[SU_LIST_MAX][BUFFER_SIZE];
 
 void _PG_init(void);
 static int createSuperuserList(void);
@@ -114,7 +116,6 @@ static int createSuperuserList() {
         for (j = 0; j < proc; j++)
         {
             HeapTuple tuple = tuptable->vals[j];
-            suList[j] = palloc(NAMEDATALEN);
             strcpy(suList[j], SPI_getvalue(tuple, tupdesc, 1));
         }
         suNum = proc;
@@ -136,10 +137,7 @@ static void debugPrintSuperuserList(void) {
 static void clearSuperuserList(void) {
     int i;
     for (i = 0; i < suNum; i++) {
-        if (suList[i] != NULL) {
-            pfree(suList[i]);
-            suList[i] = NULL;
-        }
+        strcpy(suList[i], "");
     }
     suNum = 0;
     createdFlag = false;
