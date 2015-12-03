@@ -20,7 +20,7 @@ shared_preload_libraries = pg_sulog
 
 * 'BLOCK', super user role's all operation is blocked.
 * 'MAINTENANCE', Other than the following commands, super user operation will be blocked.
-** VACUUM, REINDEX, ANALYZE, CLUSTER
+  * VACUUM, REINDEX, ANALYZE, CLUSTER
 * 'LOGGING', super user role's all operation is logged.
 
 pg_sulog.block = 'BLOCK' example.
