@@ -18,6 +18,9 @@
 #include "utils/guc.h"
 #include "utils/memutils.h"
 #include "utils/timestamp.h"
+#include "libpq/auth.h"
+#include "port.h"
+
 
 #include "pgtime.h"
 #include <time.h>
@@ -30,9 +33,7 @@ PG_MODULE_MAGIC;
 bool creatingFlag = false;
 
 bool sulogDisableCommand = false;
-char* sulogDatabase = "postgres";
-char* sulogUser= "postgres";
-char* sulogPassword = "";
+char* sulogMode = "LOGGING";
 
 int suNum;
 char suList[SU_LIST_MAX][BUFFER_SIZE];
@@ -44,7 +45,8 @@ static void clearSuperuserList(void);
 static bool isSuperuser();
 static bool checkSuperuser(char* username);
 
-static void write_sulog(bool mode, const char* query);
+static void write_query_sulog(bool mode, const char* query);
+
 
 /*
   Judge current user is superuser role 
@@ -113,9 +115,9 @@ static int createSuperuserList() {
 
 static void debugPrintSuperuserList(void) {
     int i;
-    elog(DEBUG1, "suNum=%d", suNum);
+    elog(DEBUG1, "pg_sulog: suNum=%d", suNum);
     for (i = 0; i < suNum; i++) {
-       elog(DEBUG1, "suList[%d]=%s", i, suList[i]);
+       elog(DEBUG1, "pg_sulog: suList[%d]=%s", i, suList[i]);
     }
 }
 
@@ -128,6 +130,38 @@ static void clearSuperuserList(void) {
     creatingFlag = false;
 }
 
+static bool
+toUpperCompare(char* s1, const char* s2) {
+    int i = 0;
+    int l;
+
+    l = strlen(s1);
+    for (i=0; i < l; i++) {
+       if ( toupper( *(s1 + i)) == toupper( *(s2 + i)) ) {
+           continue;
+       } else {
+           return false;
+       }
+    }
+    return true;
+}
+
+static bool
+isMaintenanceCommand(const char* query) {
+    /* TODO: custmize configuration? */
+    if (toUpperCompare("VACUUM", query))
+        return true;
+    if (toUpperCompare("ANALYZE", query))
+        return true;
+    if (toUpperCompare("REINDEX", query))
+        return true;
+    if (toUpperCompare("CLUSTER", query))
+        return true;
+
+    /* else, not Maintenance command. */
+    return false;
+}
+
 /*
  * Hook functions
  */
@@ -135,7 +169,7 @@ static ProcessUtility_hook_type next_ProcessUtility_hook = NULL;
 static ExecutorRun_hook_type next_ExecutorRun_hook = NULL;
 
 /*
- * Hook ExecutorRun 
+ * Hook ExecutorRun to logging for DML.
  */
 static void
 pg_sulog_ExecutorRun_hook(QueryDesc *queryDesc, ScanDirection direction, long count)
@@ -149,12 +183,12 @@ pg_sulog_ExecutorRun_hook(QueryDesc *queryDesc, ScanDirection direction, long co
 
     suFlag = isSuperuser();
     if (suFlag) {
-        if (sulogDisableCommand) {
+        if ( strcmp(sulogMode, "LOGGING")) {
             /* superuser role logging (blocked) */
-            write_sulog(true, queryDesc->sourceText);
+            write_query_sulog(true, queryDesc->sourceText);
         } else {
             /* superuser role logging */
-            write_sulog(false, queryDesc->sourceText);
+            write_query_sulog(false, queryDesc->sourceText);
         }
     }
 
@@ -165,7 +199,7 @@ pg_sulog_ExecutorRun_hook(QueryDesc *queryDesc, ScanDirection direction, long co
     if (next_ExecutorRun_hook)
         next_ExecutorRun_hook(queryDesc, direction, count);
     else {
-        if ( suFlag && sulogDisableCommand ) {
+        if ( suFlag && strcmp(sulogMode, "LOGGING") )  {
             // standard_ExecutorRun(queryDesc, eflags);
         } else {
             standard_ExecutorRun(queryDesc, direction, count);
@@ -175,7 +209,7 @@ pg_sulog_ExecutorRun_hook(QueryDesc *queryDesc, ScanDirection direction, long co
 }
 
 /*
- * Hook ProcessUtility to do session auditing for DDL and utility commands.
+ * Hook ProcessUtility to logging for DDL and utility commands.
  */
 static void
 pg_sulog_ProcessUtility_hook(Node *parsetree,
@@ -186,6 +220,13 @@ pg_sulog_ProcessUtility_hook(Node *parsetree,
                              char *completionTag)
 {
     bool suFlag;
+    bool maintenanceFlag;
+
+    elog(DEBUG1, "pg_sulog: pg_sulog_ProcessUtility_hook sulogMode = %s\n", sulogMode); 
+    elog(DEBUG1, "pg_sulog: pg_sulog_ProcessUtility_hook completionTag = %s\n", completionTag); 
+    elog(DEBUG1, "pg_sulog: pg_sulog_ProcessUtility_hook queryString= %s\n", queryString); 
+    if (params)
+        elog(DEBUG1, "pg_sulog: pg_sulog_ProcessUtility_hook params->numParams= %d\n", params->numParams); 
 
     debugPrintSuperuserList();
     if (suNum == 0 && (creatingFlag == false))
@@ -193,14 +234,21 @@ pg_sulog_ProcessUtility_hook(Node *parsetree,
 
     debugPrintSuperuserList();
     suFlag = isSuperuser();
-    elog(DEBUG1, "suFlag = %d, sulogDisableCommand = %d\n", suFlag, sulogDisableCommand); 
+    elog(DEBUG1, "pg_sulog: pg_sulog_ProcessUtility_hook suFlag = %d, suLogmode= %s\n", suFlag, sulogMode); 
+
+    if ( !strcmp(sulogMode, "MAINTENANCE")) {
+        maintenanceFlag = isMaintenanceCommand(queryString);
+    } else {
+        maintenanceFlag = false;
+    }
+
     if (suFlag) {
-        if (sulogDisableCommand) {
+        if (( strcmp(sulogMode, "LOGGING") ) && !maintenanceFlag ) {
             /* superuser role logging (blocked) */
-            write_sulog(true, queryString);
+            write_query_sulog(true, queryString);
         } else {
             /* superuser role logging */
-            write_sulog(false, queryString);
+            write_query_sulog(false, queryString);
         }
     }
 
@@ -211,7 +259,7 @@ pg_sulog_ProcessUtility_hook(Node *parsetree,
         (*next_ProcessUtility_hook) (parsetree, queryString, context,
                                      params, dest, completionTag);
     else {
-        if ( suFlag && sulogDisableCommand ) {
+        if ( suFlag && ( strcmp(sulogMode, "LOGGING_ONLY") ) && !maintenanceFlag ) {
             // block
         } else {
             standard_ProcessUtility(parsetree, queryString, context,
@@ -223,7 +271,7 @@ pg_sulog_ProcessUtility_hook(Node *parsetree,
 /*
  * write pg_sulog to server log
  */
-static void write_sulog(bool block, const char* query) {
+static void write_query_sulog(bool block, const char* query) {
 
     pg_time_t       stamp_time = (pg_time_t) time(NULL);
     char            strfbuf[128];  // timestamp
@@ -238,6 +286,7 @@ static void write_sulog(bool block, const char* query) {
             (block == true) ? "blocked" : "logging" ,
             MyProcPort->user_name, query)));
 }
+
 
 void
 _PG_init(void)
@@ -258,6 +307,16 @@ _PG_init(void)
         GUC_NOT_IN_SAMPLE,
         NULL, NULL, NULL);
 
+    DefineCustomStringVariable(
+        "pg_sulog.mode",
+        "set blocking mode.",
+        "set blocking mode.(LOGGING_ONLY,MAINTENANCE,BLOCK)",
+        &sulogMode,
+        "LOGGING",
+
+        PGC_SUSET,
+        GUC_NOT_IN_SAMPLE,
+        NULL, NULL, NULL);
     creatingFlag = false;
 
     /*
@@ -271,8 +330,7 @@ _PG_init(void)
     ProcessUtility_hook = pg_sulog_ProcessUtility_hook;
 
     /* Log that the extension has completed initialization */
-    ereport(LOG, (errmsg("pg_sulog: initialized. mode=%s",
-        (sulogDisableCommand == true) ? "blocked" : "logging" )));
+    ereport(LOG, (errmsg("pg_sulog: initialized. mode=%s", sulogMode)));
 
 }
 

@@ -16,12 +16,14 @@ WARNING:  pg_sulog: 2015-11-19 21:51:20 JST [logging] user=postgres SELECT 1
 shared_preload_libraries = pg_sulog
 ```
 
-### pg_sulog.block
+### pg_sulog.mode
 
-* 'on', super user role's all operation is blocked and logged.
-* 'off', super user role's all operation is logged.
+* 'BLOCK', super user role's all operation is blocked.
+* 'MAINTENANCE', Other than the following commands, super user operation will be blocked.
+** VACUUM, REINDEX, ANALYZE, CLUSTER
+* 'LOGGING', super user role's all operation is logged.
 
-pg_sulog.block = 'on' example.
+pg_sulog.block = 'BLOCK' example.
 
 ```
 $ psql -U postgres sampledb -t -c "SELECT 3;"
@@ -30,7 +32,7 @@ SELECT 0
 $ 
 ```
 
-The default is `off`.
+The default is `LOGGING`.
 
 ## Validated environment
 
@@ -49,6 +51,7 @@ The default is `off`.
 ## Todo
 
 * Output format customize.
+* Maintenance command custmize.
 * Other platform verification.
 * Regression test
 * Stability verification
